@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Art Tracer</title>
+<style>
+:root{--pad:44;--ui:#535353}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--ui);background:#f7f7f7}
+.wrap{max-width:1100px;margin:0 auto;padding:18px}
+h1{margin:0 0 10px 0;font-size:18px;color:#222;font-weight:700}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px;background:#fff;border:1px solid #e6e6e6;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.04);margin-bottom:14px}
+.toolbar label{font-size:12px;display:inline-flex;gap:8px;align-items:center}
+.toolbar input[type=range]{width:150px}
+.toolbar select{padding:6px 8px;border:1px solid #ddd;border-radius:10px;background:#fff}
+.btn{border:1px solid #d8d8d8;background:#fff;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:12px;color:#222}
+.btn:hover{background:#fafafa}
+.hint{font-size:12px;opacity:.85}
+.canvasWrap{background:#fff;border:1px solid #e6e6e6;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.04);padding:12px;overflow:auto}
+canvas{display:block;background:#fff;image-rendering:pixelated}
+.footer{margin-top:10px;font-size:12px;opacity:.8}
+.kbd{font-family:monospace;padding:1px 6px;border:1px solid #ddd;border-bottom-width:2px;border-radius:6px;background:#fff;color:#222}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pixelart Tracer</h1>
+
+  <div class="toolbar">
+    <input id="file" type="file" accept="image/*" class="btn" />
+
+    <label>Grid Size
+      <select id="gridSize">
+        <option>5</option>
+        <option>10</option>
+        <option>15</option>
+        <option selected>20</option>
+        <option>25</option>
+        <option>30</option>
+        <option>35</option>
+      </select>
+    </label>
+
+    <label><input type="checkbox" id="toggleBg" checked> Show Background</label>
+    <label><input type="checkbox" id="lockBg"> Lock Background</label>
+
+    <label>Background Opacity
+      <input id="bgOpacity" type="range" min="0" max="100" value="50" />
+      <span id="bgOpacityVal" class="hint">50%</span>
+    </label>
+
+    <label>Cell Size
+      <input id="cellSize" type="range" min="14" max="44" value="28" />
+      <span id="cellSizeVal" class="hint">28</span>
+    </label>
+
+    <label>Image Zoom
+      <input id="imgScale" type="range" min="10" max="400" value="100" />
+      <span id="imgScaleVal" class="hint">100%</span>
+    </label>
+
+    <label>Image X
+      <input id="imgX" type="range" min="-1200" max="1200" value="0" />
+      <span id="imgXVal" class="hint">0</span>
+    </label>
+
+    <label>Image Y
+      <input id="imgY" type="range" min="-1200" max="1200" value="0" />
+      <span id="imgYVal" class="hint">0</span>
+    </label>
+
+    <button id="imgReset" class="btn" type="button">Center Image</button>
+    <button id="clear" class="btn" type="button">Clear All</button>
+    <button id="invert" class="btn" type="button">Invert</button>
+    <button id="save" class="btn" type="button">Save PNG</button>
+
+    <span class="hint">
+      Drag = paint · <span class="kbd">Shift</span> = erase · Mouse wheel = zoom · Right-click drag = move image
+    </span>
+  </div>
+
+  <div class="canvasWrap">
+    <canvas id="c"></canvas>
+    <div class="footer">Export includes grid, numbers, pixels, and optional background.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const pad = () => Number(getComputedStyle(document.documentElement).getPropertyValue('--pad').replace('px','')) || 44;
+
+  const els = {
+    file: document.getElementById('file'),
+    gridSize: document.getElementById('gridSize'),
+    toggleBg: document.getElementById('toggleBg'),
+    lockBg: document.getElementById('lockBg'),
+    bgOpacity: document.getElementById('bgOpacity'),
+    bgOpacityVal: document.getElementById('bgOpacityVal'),
+    cellSize: document.getElementById('cellSize'),
+    cellSizeVal: document.getElementById('cellSizeVal'),
+    imgScale: document.getElementById('imgScale'),
+    imgScaleVal: document.getElementById('imgScaleVal'),
+    imgX: document.getElementById('imgX'),
+    imgXVal: document.getElementById('imgXVal'),
+    imgY: document.getElementById('imgY'),
+    imgYVal: document.getElementById('imgYVal'),
+    imgReset: document.getElementById('imgReset'),
+    clear: document.getElementById('clear'),
+    invert: document.getElementById('invert'),
+    save: document.getElementById('save'),
+    canvas: document.getElementById('c'),
+  };
+
+  const ctx = els.canvas.getContext('2d');
+
+  let GRID = Number(els.gridSize.value);
+  let cell = Number(els.cellSize.value);
+  let bgAlpha = Number(els.bgOpacity.value) / 100;
+
+  let img = null;
+  let imgScale = Number(els.imgScale.value) / 100; // 1.0 = 100%
+  let imgOffsetX = Number(els.imgX.value);
+  let imgOffsetY = Number(els.imgY.value);
+
+  let pixels = createGrid(GRID);
+
+  function createGrid(n){
+    return Array.from({ length: n }, () => Array(n).fill(0));
+  }
+
+  function resize(){
+    cell = Number(els.cellSize.value);
+    const w = pad() + GRID * cell + 12;
+    const h = pad() + GRID * cell + 12;
+    const dpr = window.devicePixelRatio || 1;
+
+    els.canvas.width = Math.round(w * dpr);
+    els.canvas.height = Math.round(h * dpr);
+    els.canvas.style.width = w + 'px';
+    els.canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    draw();
+  }
+
+  function draw(){
+    const W = els.canvas.clientWidth;
+    const H = els.canvas.clientHeight;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+
+    const p = pad();
+    const gridW = GRID * cell;
+    const gridH = GRID * cell;
+
+    // Background image
+    if (img && els.toggleBg.checked) {
+      ctx.save();
+      ctx.globalAlpha = bgAlpha;
+      const baseScale = Math.min(gridW / img.width, gridH / img.height);
+      const s = baseScale * imgScale;
+      const iw = img.width * s;
+      const ih = img.height * s;
+      const ix = p + (gridW - iw) / 2 + imgOffsetX;
+      const iy = p + (gridH - ih) / 2 + imgOffsetY;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(img, ix, iy, iw, ih);
+      ctx.restore();
+    }
+
+    // Axis numbers
+    ctx.save();
+    ctx.fillStyle = '#222';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let x = 0; x < GRID; x++) ctx.fillText(String(x + 1), p + x * cell + cell / 2, p / 2);
+    for (let y = 0; y < GRID; y++) ctx.fillText(String(y + 1), p / 2, p + y * cell + cell / 2);
+    ctx.restore();
+
+    // Painted pixels
+    ctx.fillStyle = '#000';
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        if (pixels[y][x]) ctx.fillRect(p + x * cell, p + y * cell, cell, cell);
+      }
+    }
+
+    // Grid lines
+    for (let i = 0; i <= GRID; i++) {
+      const gx = p + i * cell;
+      const gy = p + i * cell;
+      ctx.strokeStyle = (i % 5 === 0) ? 'rgba(255,0,0,.75)' : 'rgba(255,0,0,.25)';
+      ctx.lineWidth = (i % 5 === 0) ? 1.2 : 1;
+
+      ctx.beginPath();
+      ctx.moveTo(gx, p);
+      ctx.lineTo(gx, p + gridH);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(p, gy);
+      ctx.lineTo(p + gridW, gy);
+      ctx.stroke();
+    }
+
+    // Outer border
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(p, p, gridW, gridH);
+  }
+
+  function clientToCell(clientX, clientY){
+    const r = els.canvas.getBoundingClientRect();
+    const x = clientX - r.left;
+    const y = clientY - r.top;
+    const p = pad();
+    if (x < p || y < p || x >= p + GRID * cell || y >= p + GRID * cell) return null;
+    return { x: Math.floor((x - p) / cell), y: Math.floor((y - p) / cell) };
+  }
+
+  function setAt(c, v){ pixels[c.y][c.x] = v ? 1 : 0; }
+  function toggleAt(c){ pixels[c.y][c.x] = pixels[c.y][c.x] ? 0 : 1; }
+
+  // Drawing + drag
+  let drawing = false;
+  let moved = false;
+  let startCell = null;
+  let startMode = 1; // 1 paint/toggle, 0 erase
+
+  let imgDragging = false;
+  let dragStart = null;
+
+  els.canvas.addEventListener('pointerdown', (e) => {
+    // Right-click drag to move background
+    if (e.button === 2 && img && !els.lockBg.checked) {
+      imgDragging = true;
+      dragStart = { x: e.clientX, y: e.clientY, ox: imgOffsetX, oy: imgOffsetY };
+      els.canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (e.button !== 0) return;
+
+    const c = clientToCell(e.clientX, e.clientY);
+    if (!c) return;
+
+    drawing = true;
+    moved = false;
+    startCell = c;
+    startMode = e.shiftKey ? 0 : 1;
+
+    // Immediate erase on down (also supports single erase click)
+    if (startMode === 0) {
+      setAt(c, 0);
+      draw();
+    }
+  });
+
+  els.canvas.addEventListener('pointermove', (e) => {
+    if (imgDragging && dragStart && img && !els.lockBg.checked) {
+      imgOffsetX = dragStart.ox + (e.clientX - dragStart.x);
+      imgOffsetY = dragStart.oy + (e.clientY - dragStart.y);
+
+      els.imgX.value = String(imgOffsetX);
+      els.imgY.value = String(imgOffsetY);
+      els.imgXVal.textContent = String(imgOffsetX | 0);
+      els.imgYVal.textContent = String(imgOffsetY | 0);
+
+      draw();
+      return;
+    }
+
+    if (!drawing) return;
+
+    const c = clientToCell(e.clientX, e.clientY);
+    if (!c) return;
+
+    if (startCell && (c.x !== startCell.x || c.y !== startCell.y)) moved = true;
+
+    // Shift can be toggled while dragging
+    const mode = e.shiftKey ? 0 : 1;
+    setAt(c, mode);
+    draw();
+  });
+
+  els.canvas.addEventListener('pointerup', () => {
+    // Single click without moving:
+    // - paint mode -> toggle
+    // - erase mode -> already erased on down
+    if (drawing && !moved && startCell) {
+      if (startMode === 1) toggleAt(startCell);
+      draw();
+    }
+
+    drawing = false;
+    moved = false;
+    startCell = null;
+
+    imgDragging = false;
+    dragStart = null;
+  });
+
+  els.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Mouse wheel zoom (background)
+  els.canvas.addEventListener('wheel', (e) => {
+    if (!img) return;
+    if (els.lockBg.checked) return;
+
+    // 🚫 If background is locked, block zoom completely
+    if (els.lockBg.checked) {
+      e.preventDefault();
+      return;
+    }
+
+    e.preventDefault();
+
+    const cur = Number(els.imgScale.value);
+    const step = (e.deltaY < 0) ? 5 : -5;
+    const next = Math.max(Number(els.imgScale.min), Math.min(Number(els.imgScale.max), cur + step));
+
+    els.imgScale.value = String(next);
+    imgScale = next / 100;
+    els.imgScaleVal.textContent = next + '%';
+    draw();
+  }, { passive: false });
+
+  // Controls
+  els.gridSize.addEventListener('change', () => {
+    GRID = Number(els.gridSize.value);
+    pixels = createGrid(GRID);
+    resize();
+  });
+
+  els.toggleBg.addEventListener('change', () => draw());
+
+  els.bgOpacity.addEventListener('input', () => {
+    bgAlpha = Number(els.bgOpacity.value) / 100;
+    els.bgOpacityVal.textContent = els.bgOpacity.value + '%';
+    draw();
+  });
+
+  els.cellSize.addEventListener('input', () => {
+    els.cellSizeVal.textContent = els.cellSize.value;
+    resize();
+  });
+
+  els.imgScale.addEventListener('input', () => {
+    imgScale = Number(els.imgScale.value) / 100;
+    els.imgScaleVal.textContent = els.imgScale.value + '%';
+    draw();
+  });
+
+  els.imgX.addEventListener('input', () => {
+    imgOffsetX = Number(els.imgX.value);
+    els.imgXVal.textContent = String(imgOffsetX);
+    draw();
+  });
+
+  els.imgY.addEventListener('input', () => {
+    imgOffsetY = Number(els.imgY.value);
+    els.imgYVal.textContent = String(imgOffsetY);
+    draw();
+  });
+
+  els.imgReset.addEventListener('click', () => {
+    imgOffsetX = 0;
+    imgOffsetY = 0;
+    els.imgX.value = '0';
+    els.imgY.value = '0';
+    els.imgXVal.textContent = '0';
+    els.imgYVal.textContent = '0';
+    draw();
+  });
+
+  els.clear.addEventListener('click', () => {
+    pixels = createGrid(GRID);
+    draw();
+  });
+
+  els.invert.addEventListener('click', () => {
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        pixels[y][x] = pixels[y][x] ? 0 : 1;
+      }
+    }
+    draw();
+  });
+
+  // Upload
+  els.file.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        img = im;
+        // reset view
+        imgScale = 1;
+        imgOffsetX = 0;
+        imgOffsetY = 0;
+        els.imgScale.value = '100';
+        els.imgScaleVal.textContent = '100%';
+        els.imgX.value = '0';
+        els.imgY.value = '0';
+        els.imgXVal.textContent = '0';
+        els.imgYVal.textContent = '0';
+        draw();
+      };
+      im.onerror = () => alert('Image could not be loaded. Please try PNG or JPG.');
+      im.src = String(reader.result);
+    };
+    reader.onerror = () => alert('Error reading file.');
+    reader.readAsDataURL(f);
+  });
+
+  // Export (PNG mit Grid + Nummern + optional Hintergrund)
+  els.save.addEventListener('click', () => {
+    const p = pad();
+    const w = p + GRID * cell + 12;
+    const h = p + GRID * cell + 12;
+
+    const dpr = 2;
+    const out = document.createElement('canvas');
+    out.width = Math.round(w * dpr);
+    out.height = Math.round(h * dpr);
+    const o = out.getContext('2d');
+    o.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // render
+    o.clearRect(0, 0, w, h);
+    o.fillStyle = '#fff';
+    o.fillRect(0, 0, w, h);
+
+    const gridW = GRID * cell;
+    const gridH = GRID * cell;
+
+    if (img && els.toggleBg.checked) {
+      o.save();
+      o.globalAlpha = bgAlpha;
+      const baseScale = Math.min(gridW / img.width, gridH / img.height);
+      const s = baseScale * imgScale;
+      const iw = img.width * s;
+      const ih = img.height * s;
+      const ix = p + (gridW - iw) / 2 + imgOffsetX;
+      const iy = p + (gridH - ih) / 2 + imgOffsetY;
+      o.imageSmoothingEnabled = true;
+      o.drawImage(img, ix, iy, iw, ih);
+      o.restore();
+    }
+
+    // Axis numbers
+    o.save();
+    o.fillStyle = '#222';
+    o.font = '12px Arial';
+    o.textAlign = 'center';
+    o.textBaseline = 'middle';
+    for (let x = 0; x < GRID; x++) o.fillText(String(x + 1), p + x * cell + cell / 2, p / 2);
+    for (let y = 0; y < GRID; y++) o.fillText(String(y + 1), p / 2, p + y * cell + cell / 2);
+    o.restore();
+
+    // Pixels
+    o.fillStyle = '#000';
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        if (pixels[y][x]) o.fillRect(p + x * cell, p + y * cell, cell, cell);
+      }
+    }
+
+    // Grid lines
+    for (let i = 0; i <= GRID; i++) {
+      const gx = p + i * cell;
+      const gy = p + i * cell;
+      o.strokeStyle = (i % 5 === 0) ? 'rgba(255,0,0,.75)' : 'rgba(255,0,0,.25)';
+      o.lineWidth = (i % 5 === 0) ? 1.2 : 1;
+
+      o.beginPath();
+      o.moveTo(gx, p);
+      o.lineTo(gx, p + gridH);
+      o.stroke();
+
+      o.beginPath();
+      o.moveTo(p, gy);
+      o.lineTo(p + gridW, gy);
+      o.stroke();
+    }
+
+    o.strokeStyle = '#222';
+    o.lineWidth = 1;
+    o.strokeRect(p, p, gridW, gridH);
+
+    const filename = `pixelart-${GRID}x${GRID}.png`;
+
+    // Blob download (reliable)
+    out.toBlob((blob) => {
+      if (!blob) {
+        const url = out.toDataURL('image/png');
+        window.open(url, '_blank');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = url;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }, 'image/png');
+  });
+
+  // Init labels
+  els.bgOpacityVal.textContent = els.bgOpacity.value + '%';
+  els.cellSizeVal.textContent = els.cellSize.value;
+  els.imgScaleVal.textContent = els.imgScale.value + '%';
+  els.imgXVal.textContent = els.imgX.value;
+  els.imgYVal.textContent = els.imgY.value;
+
+  resize();
+  window.addEventListener('resize', resize);
+})();
+</script>
+</body>
+</html>
