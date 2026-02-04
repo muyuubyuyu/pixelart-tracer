@@ -3,8 +3,10 @@
 A browser-based tool for tracing images into pixel art grids.  
 Designed for creating layouts for Picross Touch and other grid-based puzzle games.
 
-Live demo:  
-https://muyubuyu.github.io/pixelart-tracer/
+## Live Demo
+
+Use directly in your browser:  
+[muyuubyuyu.github.io/pixelart-tracer](https://muyuubyuyu.github.io/pixelart-tracer/)
 
 ---
 
