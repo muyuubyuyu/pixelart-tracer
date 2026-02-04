@@ -375,10 +375,27 @@ canvas{display:block;background:#fff;image-rendering:pixelated}
     draw();
   });
 
-  els.clear.addEventListener('click', () => {
-    pixels = createGrid(GRID);
-    draw();
-  });
+els.clear.addEventListener('click', () => {
+  pixels = createGrid(GRID);
+  img = null;
+  imgScale = 1;
+  imgOffsetX = 0;
+  imgOffsetY = 0;
+
+  els.imgScale.value = '100';
+  els.imgScaleVal.textContent = '100%';
+
+  els.imgX.value = '0';
+  els.imgY.value = '0';
+  els.imgXVal.textContent = '0';
+  els.imgYVal.textContent = '0';
+
+  els.file.value = '';
+
+  draw();
+});
+
+
 
   els.invert.addEventListener('click', () => {
     for (let y = 0; y < GRID; y++) {
